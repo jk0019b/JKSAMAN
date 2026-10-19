@@ -34,126 +34,122 @@ nav .on{color:var(--pk)}
 .modal>div{background:var(--card);border-radius:16px;padding:18px;width:100%;max-width:420px;max-height:88vh;overflow:auto}
 code{background:var(--bg);padding:8px;border-radius:8px;display:block;margin:6px 0;word-break:break-all;user-select:all}
 img.qr,img.slip{max-width:100%;border-radius:10px;display:block;margin:8px auto}
+.mut a{color:var(--pk)}
 </style></head><body>
 <header><div class="logo">🎮 BB2</div><span id="hr"></span></header>
 <main id="app"></main>
 <nav id="nav"></nav><div id="toast"></div>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <script>
-const K='bb2db';
-let DB;
-function load(){try{DB=JSON.parse(localStorage.getItem(K))}catch(e){DB=null}
- if(!DB)DB={users:[],items:[],topups:[],orders:[],qr:'',me:null};}
-function save(){try{localStorage.setItem(K,JSON.stringify(DB))}catch(e){toast('ພື້ນທີ່ເກັບເຕັມ — ໃຊ້ຮູບນ້ອຍລົງ')}}
+// ===== ໃສ່ຄ່າຈາກ Firebase Console > Project settings > Your apps (Web) =====
+const CFG={apiKey:"AIzaSyCXKkkqDBYeNRgHDMBPrxq7fDvBfe82Ytk",authDomain:"jksaman-dba51.firebaseapp.com",projectId:"jksaman-dba51",appId:"1:357019137772:web:504dfa0f5854f7f63f97c9"};
+// =========================================================================
+firebase.initializeApp(CFG);const auth=firebase.auth(),db=firebase.firestore(),INC=firebase.firestore.FieldValue.increment;
+const S={me:null,uid:null,items:[],listings:[],vault:[],topups:[],pend:[],users:[],qr:''};
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt=n=>Number(n).toLocaleString('en-US')+' ₭';
 const $=s=>document.querySelector(s);
-async function hash(s){try{const b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode('bb2:'+s));return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join('')}catch(e){return btoa(s)}}
-function toast(t){const e=$('#toast');e.textContent=t;e.style.display='block';setTimeout(()=>e.style.display='none',2600)}
+const em=u=>u.trim().toLowerCase()+'@bb2.app';
+function toast(t){const e=$('#toast');e.textContent=t;e.style.display='block';setTimeout(()=>e.style.display='none',2800)}
 function resize(file,max=720){return new Promise(r=>{const i=new Image,u=URL.createObjectURL(file);i.onload=()=>{const k=Math.min(1,max/Math.max(i.width,i.height)),c=document.createElement('canvas');c.width=i.width*k;c.height=i.height*k;c.getContext('2d').drawImage(i,0,0,c.width,c.height);URL.revokeObjectURL(u);r(c.toDataURL('image/jpeg',.7))};i.src=u})}
-const me=()=>DB.users.find(u=>u.u===DB.me);
-const isAdmin=()=>me()?.role==='admin';
-let tab='shop',view='';
+const isAdmin=()=>S.me?.role==='admin';
+let tab='shop',q='',gf='',so='',unsubs=[],pub=[];
+const err=e=>{console.error(e);toast('ຜິດພາດ: '+(e.code||e.message))};
 
-async function init(){load();DB.reports=DB.reports||[];
- if(!DB.users.some(u=>u.role==='admin')){DB.users.push({u:'admin',p:await hash('admin123'),role:'admin',bal:0});save()}
- render()}
+// ---------- ຂໍ້ມູນສາທາລະນະ (ທຸກຄົນເຫັນ) ----------
+pub=[db.collection('items').onSnapshot(s=>{S.items=s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>b.ts-a.ts);soft()},err),
+ db.collection('listing').where('sold','==',false).onSnapshot(s=>{S.listings=s.docs.map(d=>({id:d.id,...d.data()}));soft()},err)];
+auth.onAuthStateChanged(u=>{unsubs.forEach(f=>f());unsubs=[];S.me=null;S.vault=[];S.topups=[];S.pend=[];S.users=[];S.uid=u?u.uid:null;
+ if(u){const U=db.collection('users').doc(u.uid);
+  unsubs.push(U.onSnapshot(d=>{const was=isAdmin();S.me=d.exists?d.data():null;if(isAdmin()&&!was)adminSubs();soft()},err),
+  db.collection('vault').where('owner','==',u.uid).onSnapshot(s=>{S.vault=s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>b.soldAt-a.soldAt);soft()},err),
+  db.collection('topups').where('uid','==',u.uid).onSnapshot(s=>{S.topups=s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>b.ts-a.ts);soft()},err),
+  db.doc('settings/qr').onSnapshot(d=>{S.qr=d.exists?d.data().img:'';soft()},()=>{}))}
+ render()});
+function adminSubs(){unsubs.push(
+ db.collection('topups').where('st','==','p').onSnapshot(s=>{S.pend=s.docs.map(d=>({id:d.id,...d.data()}));soft()},err),
+ db.collection('users').onSnapshot(s=>{S.users=s.docs.map(d=>({id:d.id,...d.data()}));soft()},err),
+ db.collection('vault').onSnapshot(s=>{S.allVault=s.docs.map(d=>({id:d.id,...d.data()}));soft()},err))}
+function soft(){const a=document.activeElement;if(a&&/INPUT|TEXTAREA|SELECT/.test(a.tagName)&&$('#app').contains(a))return;render()}
 
 function render(){
- const m=me();
- $('#hr').innerHTML=m?(isAdmin()?'<button class="gold" onclick="tab=\'admin\';render()">⚙️ Admin'+badge()+'</button> ':'')+`<button onclick="logout()">ອອກ</button>`:`<button class="red" onclick="tab='login';render()">ເຂົ້າສູ່ລະບົບ</button> <button onclick="tab='reg';render()">ສະໝັກ</button>`;
+ const m=S.me;
+ $('#hr').innerHTML=S.uid?(isAdmin()?`<button class="gold" onclick="tab='admin';render()">⚙️ Admin${S.pend.length?' ('+S.pend.length+')':''}</button> `:'')+`<button onclick="auth.signOut();tab='shop'">ອອກ</button>`:`<button class="red" onclick="tab='login';render()">ເຂົ້າສູ່ລະບົບ</button> <button onclick="tab='reg';render()">ສະໝັກ</button>`;
  const T=[['shop','🎮','ເຕີມເກມ'],['hist','🕒','ປະຫວັດ'],['topup','💰','ເຕີມເງິນ'],['prof','👤','ໂປຣໄຟລ໌']];
  $('#nav').innerHTML=T.map(t=>`<div class="${tab===t[0]?'on':''}" onclick="go('${t[0]}')"><b>${t[1]}</b>${t[2]}</div>`).join('');
- const f={shop,hist,topup,prof,login,reg,admin}[tab]||shop;
- $('#app').innerHTML=f();
-}
-function go(t){if(['hist','topup','prof'].includes(t)&&!me()){toast('ກະລຸນາເຂົ້າສູ່ລະບົບກ່ອນ');tab='login'}else tab=t;render()}
-function logout(){DB.me=null;save();tab='shop';render()}
+ if(!CFG.projectId){$('#app').innerHTML='<p class="mut">ຍັງບໍ່ໄດ້ໃສ່ຄ່າ Firebase ໃນໄຟລ໌ index.html (ຕົວແປ CFG)</p>';return}
+ if(['hist','topup','prof'].includes(tab)&&!m)tab=S.uid?tab:'login';
+ if(tab==='admin'&&!isAdmin())tab='shop';
+ $('#app').innerHTML=({shop,hist,topup,prof,login,reg,admin}[tab]||shop)()}
+function go(t){if(['hist','topup','prof'].includes(t)&&!S.uid){toast('ກະລຸນາເຂົ້າສູ່ລະບົບກ່ອນ');tab='login'}else tab=t;render()}
 
-let q='',gf='',so='';
-function shop(){const gs=[...new Set(DB.items.map(i=>i.game))];return `<h2>🛒 ບ່ອນຊື້ຂາຍໄອດີເກມ</h2><input id="q" placeholder="🔍 ຄົ້ນຫາ..." value="${esc(q)}" oninput="q=this.value;drawList()"><div style="display:flex;gap:8px"><select onchange="gf=this.value;drawList()"><option value="">ທຸກເກມ</option>${gs.map(g=>`<option ${g===gf?'selected':''}>${esc(g)}</option>`).join('')}</select><select onchange="so=this.value;drawList()"><option value="">ໃໝ່ສຸດ</option><option value="a" ${so==='a'?'selected':''}>ລາຄາຕ່ຳ→ສູງ</option><option value="d" ${so==='d'?'selected':''}>ລາຄາສູງ→ຕ່ຳ</option></select></div><div id="lst">${cards(flt())}</div>`}
-function flt(){let L=DB.items.filter(i=>(!gf||i.game===gf)&&(!q||(i.title+' '+i.game).toLowerCase().includes(q.toLowerCase())));if(so)L=[...L].sort((a,b)=>so==='a'?a.price-b.price:b.price-a.price);return L}
-function drawList(){const e=$('#lst');if(e)e.innerHTML=cards(flt())}
-function cards(L){return (L.length?L.map(i=>{const n=i.accts.length;return `<div class="card">${i.img?`<img class="th" src="${i.img}">`:''}<div class="pad"><span class="tag">${esc(i.game)}</span><h3 style="margin:10px 0 6px">${esc(i.title)}</h3><div class="price">${fmt(i.price)}</div><div class="stock ${n?'ok':'no'}">${n?'ເຫຼືອ '+n+' ໄອດີ':'ໝົດແລ້ວ'}</div><button class="red full" ${n?'':'disabled'} onclick="buy('${i.id}')">ຊື້ໄອດີນີ້</button></div></div>`}).join(''):'<p class="mut">ຍັງບໍ່ມີສິນຄ້າ</p>');
-}
-function buy(id){
- const m=me();if(!m){toast('ກະລຸນາເຂົ້າສູ່ລະບົບກ່ອນ');tab='login';return render()}
- const i=DB.items.find(x=>x.id===id);if(!i||!i.accts.length)return toast('ສິນຄ້າໝົດ');
- if(m.bal<i.price)return toast('ເງິນບໍ່ພໍ — ກະລຸນາເຕີມເງິນ');
- if(!window._ok){modal(`<h3>ຢືນຢັນການຊື້</h3><p>${esc(i.title)}<br><span class="price">${fmt(i.price)}</span></p><button class="red full" onclick="window._ok=1;closeM();buy('${id}')">ຢືນຢັນຊື້</button><button class="full" onclick="closeM()">ຍົກເລີກ</button>`);return}window._ok=0;
- const k=Math.floor(Math.random()*i.accts.length),a=i.accts.splice(k,1)[0];
- m.bal-=i.price;DB.orders.unshift({id:Date.now(),u:m.u,iid:i.id,title:i.title,game:i.game,price:i.price,a,ts:new Date().toLocaleString()});save();
- modal(`<h3>✅ ຊື້ສຳເລັດ</h3><p>${esc(i.title)}</p><label>ຊື່ຜູ້ໃຊ້</label><code>${esc(a.u)}</code><label>ລະຫັດຜ່ານ</label><code>${esc(a.p)}</code><p class="mut">ເບິ່ງຄືນໄດ້ໃນ "ປະຫວັດ"</p><button class="full" onclick="closeM()">ປິດ</button>`);render()}
-function modal(h){const d=document.createElement('div');d.className='modal';d.id='md';d.innerHTML='<div>'+h+'</div>';document.body.appendChild(d)}
+// ---------- ຮ້ານ ----------
+const cnt=id=>S.listings.filter(l=>l.itemId===id).length;
+function shop(){const gs=[...new Set(S.items.map(i=>i.game))];return `<h2>🛒 ບ່ອນຊື້ຂາຍໄອດີເກມ</h2><input placeholder="🔍 ຄົ້ນຫາ..." value="${esc(q)}" oninput="q=this.value;drawList()"><div style="display:flex;gap:8px"><select onchange="gf=this.value;drawList()"><option value="">ທຸກເກມ</option>${gs.map(g=>`<option ${g===gf?'selected':''}>${esc(g)}</option>`).join('')}</select><select onchange="so=this.value;drawList()"><option value="">ໃໝ່ສຸດ</option><option value="a" ${so==='a'?'selected':''}>ລາຄາຕ່ຳ→ສູງ</option><option value="d" ${so==='d'?'selected':''}>ລາຄາສູງ→ຕ່ຳ</option></select></div><div id="lst">${cards()}</div>`}
+function drawList(){const e=$('#lst');if(e)e.innerHTML=cards()}
+function cards(){let L=S.items.filter(i=>(!gf||i.game===gf)&&(!q||(i.title+' '+i.game).toLowerCase().includes(q.toLowerCase())));if(so)L=[...L].sort((a,b)=>so==='a'?a.price-b.price:b.price-a.price);
+ return L.length?L.map(i=>{const n=cnt(i.id);return `<div class="card">${i.img?`<img class="th" src="${i.img}">`:''}<div class="pad"><span class="tag">${esc(i.game)}</span><h3 style="margin:10px 0 6px">${esc(i.title)}</h3><div class="price">${fmt(i.price)}</div><div class="stock ${n?'ok':'no'}">${n?'ເຫຼືອ '+n+' ໄອດີ':'ໝົດແລ້ວ'}</div><button class="red full" ${n?'':'disabled'} onclick="buy('${i.id}')">ຊື້ໄອດີນີ້</button></div></div>`}).join(''):'<p class="mut">ຍັງບໍ່ມີສິນຄ້າ</p>'}
+function modal(h){closeM();const d=document.createElement('div');d.className='modal';d.id='md';d.innerHTML='<div>'+h+'</div>';document.body.appendChild(d)}
 function closeM(){$('#md')?.remove()}
+function buy(id){const i=S.items.find(x=>x.id===id),L=S.listings.filter(l=>l.itemId===id);
+ if(!S.me){toast('ກະລຸນາເຂົ້າສູ່ລະບົບກ່ອນ');tab='login';return render()}
+ if(!L.length)return toast('ສິນຄ້າໝົດ');if(S.me.bal<L[0].price)return toast('ເງິນບໍ່ພໍ — ກະລຸນາເຕີມເງິນ');
+ modal(`<h3>ຢືນຢັນການຊື້</h3><p>${esc(i.title)}<br><span class="price">${fmt(L[0].price)}</span></p><button class="red full" id="cb" onclick="doBuy('${id}')">ຢືນຢັນຊື້</button><button class="full" onclick="closeM()">ຍົກເລີກ</button>`)}
+async function doBuy(id){$('#cb').disabled=true;const L=S.listings.filter(l=>l.itemId===id).sort(()=>Math.random()-.5).slice(0,3);
+ for(const l of L){try{const b=db.batch();
+  b.update(db.doc('users/'+S.uid),{bal:S.me.bal-l.price,lastBuy:l.id});
+  b.update(db.doc('listing/'+l.id),{sold:true});
+  b.update(db.doc('vault/'+l.id),{owner:S.uid,soldAt:Date.now()});
+  await b.commit();const a=(await db.doc('vault/'+l.id).get()).data();
+  return modal(`<h3>✅ ຊື້ສຳເລັດ</h3><p>${esc(a.title)}</p><label>ຊື່ຜູ້ໃຊ້</label><code>${esc(a.u)}</code><label>ລະຫັດຜ່ານ</label><code>${esc(a.p)}</code><p class="mut">ເບິ່ງຄືນໄດ້ໃນ "ປະຫວັດ"</p><button class="full" onclick="closeM()">ປິດ</button>`)}catch(e){console.warn(e)}}
+ closeM();toast('ຊື້ບໍ່ສຳເລັດ (ອາດມີຄົນຊື້ກ່ອນ ຫຼືເງິນບໍ່ພໍ) ລອງໃໝ່')}
 
-function hist(){const o=DB.orders.filter(x=>x.u===DB.me);
- return `<h2>🕒 ປະຫວັດການຊື້</h2>`+(o.length?o.map(x=>`<div class="card pad"><span class="tag">${esc(x.game)}</span> <b>${esc(x.title)}</b><div class="price">${fmt(x.price)}</div><label>ຊື່ຜູ້ໃຊ້</label><code>${esc(x.a.u)}</code><label>ລະຫັດຜ່ານ</label><code>${esc(x.a.p)}</code><div class="mut">${esc(x.ts)}</div>${rptBtn(x)}</div>`).join(''):'<p class="mut">ຍັງບໍ່ມີປະຫວັດ</p>')+
- `<h2>ປະຫວັດເຕີມເງິນ</h2>`+DB.topups.filter(t=>t.u===DB.me).map(t=>`<div class="row"><span>${fmt(t.amt)}<br><span class="mut">${esc(t.ts)}</span></span><b>${{p:'⏳ ລໍຖ້າ',a:'✅ ສຳເລັດ',r:'❌ ປະຕິເສດ'}[t.st]}</b></div>`).join('')}
+function hist(){return `<h2>🕒 ປະຫວັດການຊື້</h2>`+(S.vault.length?S.vault.map(x=>`<div class="card pad"><span class="tag">${esc(x.game)}</span> <b>${esc(x.title)}</b><div class="price">${fmt(x.price)}</div><label>ຊື່ຜູ້ໃຊ້</label><code>${esc(x.u)}</code><label>ລະຫັດຜ່ານ</label><code>${esc(x.p)}</code><div class="mut">${new Date(x.soldAt).toLocaleString()}</div></div>`).join(''):'<p class="mut">ຍັງບໍ່ມີປະຫວັດ</p>')+
+ `<h2>ປະຫວັດເຕີມເງິນ</h2>`+S.topups.map(t=>`<div class="row"><span>${fmt(t.amt)}<br><span class="mut">${new Date(t.ts).toLocaleString()}</span></span><b>${{p:'⏳ ລໍຖ້າ',a:'✅ ສຳເລັດ',r:'❌ ປະຕິເສດ'}[t.st]}</b></div>`).join('')}
 
-let slipData='';
-function topup(){return `<h2>💰 ເຕີມເງິນ</h2><div class="card pad"><p>ຍອດຄົງເຫຼືອ: <span class="price">${fmt(me().bal)}</span></p>
- ${DB.qr?`<p>1) ສະແກນ QR ເພື່ອໂອນເງິນ</p><img class="qr" src="${DB.qr}">`:'<p class="mut">ແອັດມິນຍັງບໍ່ໄດ້ຕັ້ງ QR</p>'}
- <p>2) ໃສ່ຈຳນວນເງິນ ແລະ ອັບໂຫຼດຮູບສະລິບ</p>
- <input id="amt" type="number" min="1000" placeholder="ຈຳນວນເງິນ (₭)">
- <input id="slip" type="file" accept="image/*" onchange="pickSlip(this)">
- <img id="sp" class="slip" style="display:none">
- <button class="red full" onclick="sendTopup()">ສົ່ງສະລິບ</button>
- <p class="mut">ແອັດມິນກວດສະລິບແລ້ວຍອດຈະເຂົ້າອັດຕະໂນມັດ</p></div>`}
-async function pickSlip(el){if(!el.files[0])return;slipData=await resize(el.files[0]);const p=$('#sp');p.src=slipData;p.style.display='block'}
-function sendTopup(){const a=+$('#amt').value;if(!a||a<=0)return toast('ໃສ່ຈຳນວນເງິນ');if(!slipData)return toast('ກະລຸນາອັບໂຫຼດສະລິບ');
- DB.topups.unshift({id:Date.now(),u:DB.me,amt:a,slip:slipData,st:'p',ts:new Date().toLocaleString()});slipData='';save();toast('ສົ່ງແລ້ວ ລໍຖ້າແອັດມິນກວດ');tab='hist';render()}
+// ---------- ເຕີມເງິນ ----------
+let slip='';
+function topup(){return `<h2>💰 ເຕີມເງິນ</h2><div class="card pad"><p>ຍອດຄົງເຫຼືອ: <span class="price">${fmt(S.me?.bal||0)}</span></p>${S.qr?`<p>1) ສະແກນ QR ເພື່ອໂອນເງິນ</p><img class="qr" src="${S.qr}">`:'<p class="mut">ແອັດມິນຍັງບໍ່ໄດ້ຕັ້ງ QR</p>'}<p>2) ໃສ່ຈຳນວນເງິນ ແລະ ອັບໂຫຼດຮູບສະລິບ</p><input id="amt" type="number" min="1000" placeholder="ຈຳນວນເງິນ (₭)"><input type="file" accept="image/*" onchange="pickSlip(this)"><img id="sp" class="slip" style="display:none"><button class="red full" onclick="sendTopup()">ສົ່ງສະລິບ</button><p class="mut">ແອັດມິນກວດສະລິບແລ້ວຍອດຈະເຂົ້າ</p></div>`}
+async function pickSlip(el){if(!el.files[0])return;slip=await resize(el.files[0]);const p=$('#sp');p.src=slip;p.style.display='block'}
+async function sendTopup(){const a=+$('#amt').value;if(!a||a<=0)return toast('ໃສ່ຈຳນວນເງິນ');if(!slip)return toast('ກະລຸນາອັບໂຫຼດສະລິບ');
+ try{await db.collection('topups').add({uid:S.uid,name:S.me.name,amt:a,slip,st:'p',ts:Date.now()});slip='';toast('ສົ່ງແລ້ວ ລໍຖ້າແອັດມິນກວດ');tab='hist';render()}catch(e){err(e)}}
 
-function prof(){const m=me();return `<h2>👤 ໂປຣໄຟລ໌</h2><div class="card pad"><p>ຜູ້ໃຊ້: <b>${esc(m.u)}</b> ${isAdmin()?'<span class="tag">Admin</span>':''}</p><p>ຍອດເງິນ: <span class="price">${fmt(m.bal)}</span></p>
- <label>ປ່ຽນລະຫັດຜ່ານ</label><input id="np" type="password" placeholder="ລະຫັດໃໝ່ (ຢ່າງນ້ອຍ 6 ໂຕ)"><button class="full" onclick="chpw()">ບັນທຶກ</button><button class="full" onclick="logout()">ອອກຈາກລະບົບ</button></div>`}
-async function chpw(){const v=$('#np').value;if(v.length<6)return toast('ລະຫັດສັ້ນເກີນໄປ');me().p=await hash(v);save();toast('ປ່ຽນແລ້ວ')}
-
+// ---------- ບັນຊີ ----------
+function prof(){return `<h2>👤 ໂປຣໄຟລ໌</h2><div class="card pad"><p>ຜູ້ໃຊ້: <b>${esc(S.me?.name)}</b> ${isAdmin()?'<span class="tag">Admin</span>':''}</p><p>ຍອດເງິນ: <span class="price">${fmt(S.me?.bal||0)}</span></p><label>ປ່ຽນລະຫັດຜ່ານ</label><input id="np" type="password" placeholder="ລະຫັດໃໝ່ (ຢ່າງນ້ອຍ 6 ໂຕ)"><button class="full" onclick="chpw()">ບັນທຶກ</button><button class="full" onclick="auth.signOut();tab='shop'">ອອກຈາກລະບົບ</button></div>`}
+async function chpw(){const v=$('#np').value;if(v.length<6)return toast('ລະຫັດສັ້ນເກີນໄປ');try{await auth.currentUser.updatePassword(v);toast('ປ່ຽນແລ້ວ')}catch(e){toast(e.code==='auth/requires-recent-login'?'ກະລຸນາເຂົ້າສູ່ລະບົບໃໝ່ແລ້ວລອງອີກ':'ຜິດພາດ')}}
 function login(){return `<h2>ເຂົ້າສູ່ລະບົບ</h2><div class="card pad"><input id="lu" placeholder="ຊື່ຜູ້ໃຊ້"><input id="lp" type="password" placeholder="ລະຫັດຜ່ານ"><button class="red full" onclick="doLogin()">ເຂົ້າສູ່ລະບົບ</button><button class="full" onclick="tab='reg';render()">ຍັງບໍ່ມີບັນຊີ? ສະໝັກ</button></div>`}
-async function doLogin(){const u=$('#lu').value.trim(),p=await hash($('#lp').value);const x=DB.users.find(z=>z.u===u&&z.p===p);if(!x)return toast('ຊື່ ຫຼື ລະຫັດບໍ່ຖືກ');DB.me=u;save();tab=x.role==='admin'?'admin':'shop';render()}
-function reg(){return `<h2>ສະໝັກສະມາຊິກ</h2><div class="card pad"><input id="ru" placeholder="ຊື່ຜູ້ໃຊ້"><input id="rp" type="password" placeholder="ລະຫັດຜ່ານ (ຢ່າງນ້ອຍ 6 ໂຕ)"><input id="rp2" type="password" placeholder="ຢືນຢັນລະຫັດຜ່ານ"><button class="red full" onclick="doReg()">ສະໝັກ</button></div>`}
-async function doReg(){const u=$('#ru').value.trim(),p=$('#rp').value;if(u.length<3)return toast('ຊື່ຕ້ອງ 3 ໂຕຂຶ້ນໄປ');if(p.length<6)return toast('ລະຫັດຕ້ອງ 6 ໂຕຂຶ້ນໄປ');if(p!==$('#rp2').value)return toast('ລະຫັດບໍ່ກົງກັນ');
- if(DB.users.some(x=>x.u.toLowerCase()===u.toLowerCase()))return toast('ຊື່ນີ້ມີແລ້ວ');
- DB.users.push({u,p:await hash(p),role:'user',bal:0});DB.me=u;save();tab='shop';render();toast('ສະໝັກສຳເລັດ')}
+async function doLogin(){try{await auth.signInWithEmailAndPassword(em($('#lu').value),$('#lp').value);tab='shop';render()}catch(e){toast('ຊື່ ຫຼື ລະຫັດບໍ່ຖືກ')}}
+function reg(){return `<h2>ສະໝັກສະມາຊິກ</h2><div class="card pad"><input id="ru" placeholder="ຊື່ຜູ້ໃຊ້ (a-z 0-9 _ , 3-20 ໂຕ)"><input id="rp" type="password" placeholder="ລະຫັດຜ່ານ (ຢ່າງນ້ອຍ 6 ໂຕ)"><input id="rp2" type="password" placeholder="ຢືນຢັນລະຫັດຜ່ານ"><button class="red full" onclick="doReg()">ສະໝັກ</button></div>`}
+async function doReg(){const u=$('#ru').value.trim().toLowerCase(),p=$('#rp').value;if(!/^[a-z0-9_]{3,20}$/.test(u))return toast('ຊື່ໃຊ້ໄດ້ສະເພາະ a-z 0-9 _ (3-20 ໂຕ)');if(p.length<6)return toast('ລະຫັດຕ້ອງ 6 ໂຕຂຶ້ນໄປ');if(p!==$('#rp2').value)return toast('ລະຫັດບໍ່ກົງກັນ');
+ try{const c=await auth.createUserWithEmailAndPassword(em(u),p);await db.doc('users/'+c.user.uid).set({name:u,role:'user',bal:0});tab='shop';toast('ສະໝັກສຳເລັດ')}catch(e){toast(e.code==='auth/email-already-in-use'?'ຊື່ນີ້ມີແລ້ວ':'ຜິດພາດ: '+(e.code||e.message))}}
 
+// ---------- ແອັດມິນ ----------
 let newImg='';
-function admin(){if(!isAdmin())return '<p>ບໍ່ມີສິດ</p>';
- const pend=DB.topups.filter(t=>t.st==='p');
- return `<h2>⚙️ ແອັດມິນ</h2>${dash()}${rpts()}
- <div class="card pad"><b>➕ ເພີ່ມສິນຄ້າ / ໄອດີ</b>
- <input id="ng" placeholder="ເກມ (ເຊັ່ນ Roblox, Free Fire)"><input id="nt" placeholder="ຊື່ສິນຄ້າ"><input id="np2" type="number" placeholder="ລາຄາ (₭)">
- <label>ຮູບຕົວຢ່າງ</label><input type="file" accept="image/*" onchange="pickImg(this)">
- <label>ຊື່/ລະຫັດ ແຕ່ລະໄອດີ (ໜຶ່ງແຖວ = ໜຶ່ງໄອດີ, ຮູບແບບ ຊື່:ລະຫັດ)</label><textarea id="na" rows="5" placeholder="user1:pass1&#10;user2:pass2"></textarea>
- <button class="red full" onclick="addItem()">ເພີ່ມສິນຄ້າ</button></div>
- <div class="card pad"><b>📦 ສິນຄ້າ (${DB.items.length})</b>${DB.items.map(i=>`<div class="row"><span>${esc(i.title)}<br><span class="mut">${esc(i.game)} · ${fmt(i.price)} · ເຫຼືອ ${i.accts.length}</span></span><span><button onclick="addStock('${i.id}')">+ສະຕ໋ອກ</button> <button onclick="delItem('${i.id}')">🗑</button></span></div>`).join('')}</div>
- <div class="card pad"><b>🧾 ສະລິບລໍຖ້າກວດ (${pend.length})</b>${pend.map(t=>`<div style="border-bottom:1px solid var(--bd);padding:10px 0"><b>${esc(t.u)}</b> — ${fmt(t.amt)}<div class="mut">${esc(t.ts)}</div><img class="slip" src="${t.slip}" style="max-height:260px"><button class="red" onclick="appr(${t.id},1)">✅ ອະນຸມັດ</button> <button onclick="appr(${t.id},0)">❌ ປະຕິເສດ</button></div>`).join('')}</div>
- <div class="card pad"><b>QR ຮັບເງິນ</b>${DB.qr?`<img class="qr" src="${DB.qr}" style="max-width:200px">`:''}<input type="file" accept="image/*" onchange="setQr(this)"></div>
- <div class="card pad"><b>👥 ສະມາຊິກ (${DB.users.length})</b>${DB.users.map(u=>`<div class="row"><span>${esc(u.u)}${u.role==='admin'?' 👑':''}<br><span class="mut">${fmt(u.bal)}</span></span><button onclick="adj(${DB.users.indexOf(u)})">ປັບເງິນ</button></div>`).join('')}</div>`}
+function admin(){const V=S.allVault||[];
+ return `<h2>⚙️ ແອັດມິນ</h2>
+ <div class="card pad"><b>➕ ເພີ່ມສິນຄ້າ / ໄອດີ</b><input id="ng" placeholder="ເກມ (ເຊັ່ນ Roblox, Free Fire)"><input id="nt" placeholder="ຊື່ສິນຄ້າ"><input id="np2" type="number" placeholder="ລາຄາ (₭)"><label>ຮູບຕົວຢ່າງ</label><input type="file" accept="image/*" onchange="pickImg(this)"><label>ໜຶ່ງແຖວ = ໜຶ່ງໄອດີ, ຮູບແບບ ຊື່:ລະຫັດ</label><textarea id="na" rows="5" placeholder="user1:pass1&#10;user2:pass2"></textarea><button class="red full" onclick="addItem()">ເພີ່ມສິນຄ້າ</button></div>
+ <div class="card pad"><b>📦 ສິນຄ້າ (${S.items.length})</b>${S.items.map(i=>`<div class="row"><span>${esc(i.title)}<br><span class="mut">${esc(i.game)} · ${fmt(i.price)} · ເຫຼືອ ${cnt(i.id)}</span></span><span><button onclick="stockM('${i.id}')">ໄອດີ</button> <button onclick="delItem('${i.id}')">🗑</button></span></div>`).join('')}</div>
+ <div class="card pad"><b>🧾 ສະລິບລໍຖ້າກວດ (${S.pend.length})</b>${S.pend.map(t=>`<div style="border-bottom:1px solid var(--bd);padding:10px 0"><b>${esc(t.name)}</b> — ${fmt(t.amt)}<div class="mut">${new Date(t.ts).toLocaleString()}</div><img class="slip" src="${t.slip}" style="max-height:260px"><button class="red" onclick="appr('${t.id}','${t.uid}',${t.amt},1)">✅ ອະນຸມັດ</button> <button onclick="appr('${t.id}','${t.uid}',0,0)">❌ ປະຕິເສດ</button></div>`).join('')}</div>
+ <div class="card pad"><b>QR ຮັບເງິນ</b>${S.qr?`<img class="qr" src="${S.qr}" style="max-width:200px">`:''}<input type="file" accept="image/*" onchange="setQr(this)"></div>
+ <div class="card pad"><b>👥 ສະມາຊິກ (${S.users.length})</b>${S.users.map(u=>`<div class="row"><span>${esc(u.name)}${u.role==='admin'?' 👑':''}<br><span class="mut">${fmt(u.bal)}</span></span><button onclick="adjM('${u.id}')">ປັບເງິນ</button></div>`).join('')}</div>`}
 async function pickImg(el){if(el.files[0])newImg=await resize(el.files[0])}
-function parse(t){return t.split('\n').map(l=>l.trim()).filter(Boolean).map(l=>{const k=l.indexOf(':');return k<0?null:{u:l.slice(0,k).trim(),p:l.slice(k+1).trim()}}).filter(Boolean)}
-function addItem(){const g=$('#ng').value.trim(),t=$('#nt').value.trim(),p=+$('#np2').value,a=parse($('#na').value);
+function parse(t){return t.split('\n').map(l=>l.trim()).filter(Boolean).map(l=>{const k=l.indexOf(':');return k<0?null:{u:l.slice(0,k).trim(),p:l.slice(k+1).trim()}}).filter(x=>x&&x.u&&x.p)}
+async function putAccts(item,list){for(let k=0;k<list.length;k+=200){const b=db.batch();list.slice(k,k+200).forEach(a=>{const id=db.collection('listing').doc().id;
+  b.set(db.doc('listing/'+id),{itemId:item.id,price:item.price,sold:false});
+  b.set(db.doc('vault/'+id),{itemId:item.id,u:a.u,p:a.p,owner:null,title:item.title,game:item.game,price:item.price})});await b.commit()}}
+async function addItem(){const g=$('#ng').value.trim(),t=$('#nt').value.trim(),p=+$('#np2').value,a=parse($('#na').value);
  if(!g||!t||!p)return toast('ກອກຂໍ້ມູນໃຫ້ຄົບ');if(!a.length)return toast('ໃສ່ຢ່າງນ້ອຍ 1 ໄອດີ (ຊື່:ລະຫັດ)');
- DB.items.unshift({id:'i'+Date.now(),game:g,title:t,price:p,img:newImg,accts:a});newImg='';save();toast('ເພີ່ມແລ້ວ');render()}
-function addStock(id){const i=DB.items.find(x=>x.id===id);modal(`<h3>➕ ເພີ່ມໄອດີ</h3><p class="mut">${esc(i.title)} · ເຫຼືອ <span id="sc">${i.accts.length}</span></p><input id="su" placeholder="ຊື່ຜູ້ໃຊ້ (ໄອດີ)"><input id="sp2" placeholder="ລະຫັດຜ່ານ"><button class="red full" onclick="saveStock('${id}')">ເພີ່ມ</button><button class="full" onclick="closeM()">ສຳເລັດ</button><p class="mut" style="margin-top:14px">ໄອດີທີ່ມີໃນສະຕ໋ອກ (ກົດ 🗑 ເພື່ອລຶບໂຕທີ່ໃສ່ຜິດ)</p><div id="sl"></div>`);listStock(id)}
-function saveStock(id){const u=$('#su').value.trim(),p=$('#sp2').value.trim();if(!u||!p)return toast('ໃສ່ຊື່ ແລະ ລະຫັດ');const i=DB.items.find(x=>x.id===id);i.accts.push({u,p});save();$('#su').value='';$('#sp2').value='';listStock(id);toast('ເພີ່ມແລ້ວ');render()}
-function listStock(id){const i=DB.items.find(x=>x.id===id);$('#sc').textContent=i.accts.length;$('#sl').innerHTML=i.accts.length?i.accts.map((a,k)=>`<div class="row"><span>${esc(a.u)} : ${esc(a.p)}</span><button onclick="delAcct('${id}',${k})">🗑</button></div>`).join(''):'<p class="mut">ບໍ່ມີໄອດີ</p>'}
-function delAcct(id,k){DB.items.find(x=>x.id===id).accts.splice(k,1);save();listStock(id);toast('ລຶບແລ້ວ');render()}
-function delItem(id){const i=DB.items.find(x=>x.id===id);modal(`<h3>ລຶບສິນຄ້າ?</h3><p>${esc(i.title)}</p><button class="red full" onclick="DB.items=DB.items.filter(x=>x.id!=='${id}');save();closeM();render()">ລຶບ</button><button class="full" onclick="closeM()">ຍົກເລີກ</button>`)}
-function appr(id,ok){const t=DB.topups.find(x=>x.id===id);if(t.st!=='p')return;t.st=ok?'a':'r';if(ok){const u=DB.users.find(x=>x.u===t.u);if(u)u.bal+=t.amt}save();render()}
-async function setQr(el){if(el.files[0]){DB.qr=await resize(el.files[0],500);save();render()}}
-function adj(k){const u=DB.users[k];modal(`<h3>ປັບເງິນ: ${esc(u.u)}</h3><p>ຍອດປັດຈຸບັນ: <b id="cb">${fmt(u.bal)}</b></p><input id="aa" type="number" min="1" placeholder="ຈຳນວນເງິນ (₭)"><button class="red full" onclick="doAdj(${k},1)">➕ ເພີ່ມເງິນ</button><button class="full" onclick="doAdj(${k},-1)">➖ ລົບເງິນ</button><button class="full" onclick="closeM()">ປິດ</button>`)}
-function doAdj(k,s){const n=+$('#aa').value;if(!n||n<=0)return toast('ໃສ່ຈຳນວນເງິນ');const u=DB.users[k];if(s<0&&u.bal<n)return toast('ຍອດບໍ່ພໍລົບ');u.bal+=s*n;save();$('#cb').textContent=fmt(u.bal);$('#aa').value='';toast('ປັບແລ້ວ');render()}
-function badge(){const n=DB.topups.filter(t=>t.st==='p').length+DB.reports.filter(r=>r.st==='o').length;return n?' ('+n+')':''}
-function rptBtn(x){const r=DB.reports.find(z=>z.oid===x.id);if(r)return `<p>🛠 ແຈ້ງປັນຫາ: <b>${{o:'⏳ ກຳລັງກວດ',s:'✅ ປ່ຽນໄອດີໃຫ້ແລ້ວ',f:'💸 ຄືນເງິນແລ້ວ',c:'ປິດແລ້ວ'}[r.st]}</b></p>`;return `<button class="full" onclick="reportM(${x.id})">⚠️ ໄອດີມີປັນຫາ? ແຈ້ງແອັດມິນ</button>`}
-function reportM(id){modal(`<h3>ແຈ້ງປັນຫາ</h3><textarea id="rm" rows="4" placeholder="ອະທິບາຍ ເຊັ່ນ ລະຫັດຜິດ, ຖືກລັອກ..."></textarea><button class="red full" onclick="sendRpt(${id})">ສົ່ງ</button><button class="full" onclick="closeM()">ຍົກເລີກ</button>`)}
-function sendRpt(id){const m=$('#rm').value.trim();if(!m)return toast('ອະທິບາຍປັນຫາ');DB.reports.unshift({id:Date.now(),oid:id,u:DB.me,msg:m,st:'o',ts:new Date().toLocaleString()});save();closeM();toast('ສົ່ງແລ້ວ');render()}
-function rpts(){const R=DB.reports.filter(r=>r.st==='o');return `<div class="card pad"><b>🛠 ແຈ້ງປັນຫາ (${R.length})</b>${R.map(r=>{const o=DB.orders.find(x=>x.id===r.oid);return o?`<div style="border-bottom:1px solid var(--bd);padding:10px 0"><b>${esc(r.u)}</b> · ${esc(o.title)}<div class="mut">ໄອດີ: ${esc(o.a.u)} : ${esc(o.a.p)}</div><p>${esc(r.msg)}</p><button class="red" onclick="fixRpt(${r.id},'s')">🔄 ປ່ຽນໄອດີ</button> <button onclick="fixRpt(${r.id},'f')">💸 ຄືນເງິນ</button> <button onclick="fixRpt(${r.id},'c')">ປິດ</button></div>`:''}).join('')}</div>`}
-function fixRpt(id,a){const r=DB.reports.find(x=>x.id===id);if(!r||r.st!=='o')return;const o=DB.orders.find(x=>x.id===r.oid);
- if(a==='s'){const it=DB.items.find(i=>i.id===o.iid)||DB.items.find(i=>i.title===o.title);if(!it||!it.accts.length)return toast('ບໍ່ມີສະຕ໋ອກປ່ຽນ');o.a=it.accts.splice(Math.floor(Math.random()*it.accts.length),1)[0]}
- if(a==='f'){const u=DB.users.find(x=>x.u===o.u);if(u)u.bal+=o.price}
- r.st=a;save();toast('ດຳເນີນການແລ້ວ');render()}
-function dash(){const O=DB.orders,day=ms=>new Date(ms).toDateString(),td=day(Date.now()),rev=O.reduce((s,o)=>s+o.price,0),tdr=O.filter(o=>day(o.id)===td).reduce((s,o)=>s+o.price,0),stock=DB.items.reduce((s,i)=>s+i.accts.length,0),tops=DB.topups.filter(t=>t.st==='a').reduce((s,t)=>s+t.amt,0),cnt={};
- O.forEach(o=>cnt[o.title]=(cnt[o.title]||0)+1);const top=Object.entries(cnt).sort((a,b)=>b[1]-a[1]).slice(0,3);
- const days=[...Array(7)].map((_,k)=>{const d=new Date(Date.now()-(6-k)*864e5);return{l:d.getDate()+'/'+(d.getMonth()+1),v:O.filter(o=>day(o.id)===d.toDateString()).reduce((s,o)=>s+o.price,0)}}),mx=Math.max(1,...days.map(d=>d.v));
- const bx=(a,b)=>`<div class="card pad" style="margin:0"><div class="mut">${a}</div><b>${b}</b></div>`;
- return `<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">${bx('ລາຍຮັບທັງໝົດ',fmt(rev))}${bx('ລາຍຮັບມື້ນີ້',fmt(tdr))}${bx('ຈຳນວນຂາຍ',O.length+' ໄອດີ')}${bx('ສະຕ໋ອກເຫຼືອ',stock+' ໄອດີ')}${bx('ເງິນເຕີມທັງໝົດ',fmt(tops))}${bx('ສະມາຊິກ',DB.users.length)}</div><div class="card pad"><b>📈 ຍອດຂາຍ 7 ວັນ</b>${days.map(d=>`<div style="display:flex;align-items:center;gap:8px;margin:6px 0;font-size:12px"><span style="width:38px">${d.l}</span><div style="flex:1;background:var(--bg);border-radius:6px"><div style="height:14px;width:${d.v/mx*100}%;background:var(--pk);border-radius:6px"></div></div><span>${d.v?fmt(d.v):'-'}</span></div>`).join('')}<p class="mut" style="margin:10px 0 0">🏆 ຂາຍດີ: ${top.length?top.map(t=>esc(t[0])+' ('+t[1]+')').join(', '):'-'}</p></div>`}
-init();
+ try{const r=db.collection('items').doc(),it={id:r.id,game:g,title:t,price:p};await r.set({game:g,title:t,price:p,img:newImg,ts:Date.now()});await putAccts(it,a);newImg='';toast('ເພີ່ມແລ້ວ');tab='admin';render()}catch(e){err(e)}}
+function stockM(id){const i=S.items.find(x=>x.id===id),L=(S.allVault||[]).filter(v=>v.itemId===id&&!v.owner);
+ modal(`<h3>ໄອດີ: ${esc(i.title)}</h3><p class="mut">ຍັງບໍ່ຂາຍ ${L.length}</p><label>ເພີ່ມຫຼາຍໄອດີ (ຊື່:ລະຫັດ ແຖວລະໄອດີ)</label><textarea id="sa" rows="3"></textarea><button class="red full" onclick="addStock('${id}')">ເພີ່ມ</button>${L.map(v=>`<div class="row"><span>${esc(v.u)} : ${esc(v.p)}</span><button onclick="delAcct('${v.id}','${id}')">🗑</button></div>`).join('')}<button class="full" onclick="closeM()">ປິດ</button>`)}
+async function addStock(id){const a=parse($('#sa').value);if(!a.length)return toast('ໃສ່ ຊື່:ລະຫັດ');try{await putAccts(S.items.find(x=>x.id===id),a);toast('ເພີ່ມແລ້ວ');closeM()}catch(e){err(e)}}
+async function delAcct(sid,id){try{const b=db.batch();b.delete(db.doc('listing/'+sid));b.delete(db.doc('vault/'+sid));await b.commit();setTimeout(()=>stockM(id),400)}catch(e){err(e)}}
+function delItem(id){const i=S.items.find(x=>x.id===id);modal(`<h3>ລຶບສິນຄ້າ?</h3><p>${esc(i.title)}</p><button class="red full" onclick="doDel('${id}')">ລຶບ</button><button class="full" onclick="closeM()">ຍົກເລີກ</button>`)}
+async function doDel(id){try{const b=db.batch();b.delete(db.doc('items/'+id));(S.allVault||[]).filter(v=>v.itemId===id&&!v.owner).forEach(v=>{b.delete(db.doc('listing/'+v.id));b.delete(db.doc('vault/'+v.id))});await b.commit();closeM()}catch(e){err(e)}}
+async function appr(id,uid,amt,ok){try{const b=db.batch();b.update(db.doc('topups/'+id),{st:ok?'a':'r'});if(ok)b.update(db.doc('users/'+uid),{bal:INC(amt)});await b.commit()}catch(e){err(e)}}
+async function setQr(el){if(el.files[0]){try{await db.doc('settings/qr').set({img:await resize(el.files[0],500)});toast('ບັນທຶກແລ້ວ')}catch(e){err(e)}}}
+function adjM(id){const u=S.users.find(x=>x.id===id);modal(`<h3>ປັບເງິນ: ${esc(u.name)}</h3><p>ຍອດປັດຈຸບັນ: <b>${fmt(u.bal)}</b></p><input id="aa" type="number" min="1" placeholder="ຈຳນວນເງິນ (₭)"><button class="red full" onclick="doAdj('${id}',1)">➕ ເພີ່ມເງິນ</button><button class="full" onclick="doAdj('${id}',-1)">➖ ລົບເງິນ</button><button class="full" onclick="closeM()">ປິດ</button>`)}
+async function doAdj(id,s){const n=+$('#aa').value;if(!n||n<=0)return toast('ໃສ່ຈຳນວນເງິນ');const u=S.users.find(x=>x.id===id);if(s<0&&u.bal<n)return toast('ຍອດບໍ່ພໍລົບ');try{await db.doc('users/'+id).update({bal:INC(s*n)});closeM();toast('ປັບແລ້ວ')}catch(e){err(e)}}
 </script></body></html>
